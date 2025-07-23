@@ -1,0 +1,29 @@
+{
+  "canisters": {
+    "server": {
+      "main": "server/paymentStream.mo",
+      "type": "motoko",
+      "args": "--enhanced-orthogonal-persistence"
+    },
+    "frontend": {
+      "dependencies": ["server"],
+      "frontend": {
+        "entrypoint": "client/out/index.html"
+      },
+      "source": ["client/out"],
+      "type": "assets"
+    },
+    "internet_identity": {
+      "type": "custom",
+      "candid": "https://github.com/dfinity/internet-identity/releases/latest/download/internet_identity.did",
+      "wasm": "https://github.com/dfinity/internet-identity/releases/latest/download/internet_identity_dev.wasm.gz",
+      "remote": {
+        "id": {
+          "ic": "rdmx6-jaaaa-aaaaa-aaadq-cai"
+        }
+      },
+      "specified_id": "rdmx6-jaaaa-aaaaa-aaadq-cai"
+    }
+  },
+  "output_env_file": ".env"
+}

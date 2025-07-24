@@ -8,16 +8,23 @@ import Principal "mo:base/Principal";
 import Result "mo:base/Result";
 import Text "mo:base/Text";
 import Time "mo:base/Time";
-import Cycles "mo:base/ExperimentalCycles";
-import Timer "mo:base/Timer";
+import _Cycles "mo:base/ExperimentalCycles";
+import _Timer "mo:base/Timer";
 import Float "mo:base/Float";
+import Blob "mo:base/Blob";
+import _Debug "mo:base/Debug";
 
 actor PaymentStream {
+    // HTTP Outcall Management Actor
+    let ic : actor {
+        http_request : HttpRequestArgs -> async HttpResponsePayload;
+    } = actor "aaaaa-aa";
+
     // ckBTC Minter Canister ID (mainnet)
-    private let ckBTC_MINTER_CANISTER_ID = "mqygn-kiaaa-aaaar-qaadq-cai";
+    private let _ckBTC_MINTER_CANISTER_ID = "mqygn-kiaaa-aaaar-qaadq-cai";
     
     // ckBTC Ledger Canister ID (mainnet) 
-    private let ckBTC_LEDGER_CANISTER_ID = "mxzaz-hqaaa-aaaar-qaada-cai";
+    private let _ckBTC_LEDGER_CANISTER_ID = "mxzaz-hqaaa-aaaar-qaada-cai";
 
     // Bitcoin Integration Types
     type Satoshi = Nat64;
@@ -47,6 +54,58 @@ actor PaymentStream {
             #TemporarilyUnavailable;
             #GenericError: { error_code: Nat; message: Text };
         };
+    };
+
+    // Oracle Types
+    type Oracle = {
+        id: Text;
+        name: Text;
+        endpoint: Text;
+        category: Text;
+        status: Text;
+        uptime: Text;
+        lastUpdate: Time.Time;
+        feeds: Nat;
+        apiKey: ?Text;
+        isActive: Bool;
+    };
+
+    // HTTP Outcall Types
+    type HttpRequestArgs = {
+        url : Text;
+        max_response_bytes : ?Nat64;
+        headers : [HttpHeader];
+        body : ?[Nat8];
+        method : HttpMethod;
+        transform : ?TransformRawResponseFunction;
+    };
+
+    type HttpHeader = {
+        name : Text;
+        value : Text;
+    };
+
+    type HttpMethod = {
+        #get;
+        #post;
+        #head;
+    };
+
+    type HttpResponsePayload = {
+        status : Nat;
+        headers : [HttpHeader];
+        body : [Nat8];
+    };
+
+    type TransformRawResponseFunction = {
+        function : shared query TransformRawResponse -> async HttpResponsePayload;
+        context : Blob;
+    };
+
+    type TransformRawResponse = {
+        status : Nat;
+        body : [Nat8];
+        headers : [HttpHeader];
     };
 
     type Condition = {
@@ -95,11 +154,121 @@ actor PaymentStream {
 
     private stable var streamEntries: [(Text, StreamConfig)] = [];
     private var streams = HashMap.HashMap<Text, StreamConfig>(0, Text.equal, Text.hash);
+    
+    // Oracle Storage
+    private stable var oracleEntries: [(Text, Oracle)] = [];
+    private var oracles = HashMap.HashMap<Text, Oracle>(0, Text.equal, Text.hash);
+    
     private stable var idCounter: Nat = 0;
 
     private func generateId(): Text {
         idCounter := idCounter + 1;
         Text.concat("stream-", Nat.toText(idCounter))
+    };
+
+    // Initialize default oracles
+    private func initializeOracles() : () {
+        let defaultOracles = [
+            {
+                id = "oracle-1";
+                name = "CoinGecko";
+                endpoint = "https://api.coingecko.com/api/v3";
+                category = "Market Data";
+                status = "active";
+                uptime = "99.8%";
+                lastUpdate = Time.now();
+                feeds = 8;
+                apiKey = null;
+                isActive = true;
+            },
+            {
+                id = "oracle-2";
+                name = "GitHub API";
+                endpoint = "https://api.github.com";
+                category = "Development";
+                status = "active";
+                uptime = "99.9%";
+                lastUpdate = Time.now();
+                feeds = 5;
+                apiKey = null;
+                isActive = true;
+            },
+            {
+                id = "oracle-3";
+                name = "Weather API";
+                endpoint = "https://api.openweathermap.org/data/2.5";
+                category = "Weather";
+                status = "active";
+                uptime = "99.2%";
+                lastUpdate = Time.now();
+                feeds = 4;
+                apiKey = null;
+                isActive = true;
+            }
+        ];
+
+        for (oracle in defaultOracles.vals()) {
+            oracles.put(oracle.id, oracle);
+        };
+    };
+
+    // Oracle Management Functions
+    public query func getOracles(): async [Oracle] {
+        Iter.toArray(oracles.vals())
+    };
+
+    public query func getOracle(oracleId: Text): async Result.Result<Oracle, Text> {
+        switch (oracles.get(oracleId)) {
+            case (?oracle) { #ok(oracle) };
+            case null { #err("Oracle not found") };
+        }
+    };
+
+    public shared(_msg) func addOracle(oracle: Oracle): async Result.Result<Text, Text> {
+        if (oracle.name == "" or oracle.endpoint == "") {
+            return #err("Missing required oracle fields");
+        };
+
+        oracles.put(oracle.id, oracle);
+        #ok(oracle.id)
+    };
+
+    public shared(_msg) func updateOracleStatus(oracleId: Text, status: Text): async Result.Result<(), Text> {
+        switch (oracles.get(oracleId)) {
+            case (?oracle) {
+                let updatedOracle = {
+                    oracle with 
+                    status = status;
+                    lastUpdate = Time.now();
+                };
+                oracles.put(oracleId, updatedOracle);
+                #ok(())
+            };
+            case null { #err("Oracle not found") };
+        }
+    };
+
+    // HTTP Request Helper
+    private func makeHttpRequest(url: Text): async Result.Result<Text, Text> {
+        let request: HttpRequestArgs = {
+            url = url;
+            max_response_bytes = ?2048;
+            headers = [];
+            body = null;
+            method = #get;
+            transform = null;
+        };
+
+        try {
+            let response = await ic.http_request(request);
+            let responseText = switch (Text.decodeUtf8(Blob.fromArray(response.body))) {
+                case (?text) { text };
+                case null { "Invalid UTF-8 response" };
+            };
+            #ok(responseText)
+        } catch (_error) {
+            #err("HTTP request failed")
+        }
     };
 
     public shared(msg) func createStream(config: StreamConfig): async Result.Result<Text, Text> {
@@ -192,10 +361,115 @@ actor PaymentStream {
                     if (condition.oracle == "") {
                         return #err("Invalid oracle");
                     };
+                    
+                    // Validate condition using oracle data
+                    switch (await validateConditionWithOracle(condition)) {
+                        case (#err(msg)) { return #err(msg) };
+                        case (#ok(false)) { return #ok(false) };
+                        case (#ok(true)) { /* continue */ };
+                    };
                 };
                 #ok(true)
             };
             case null { #err("Stream not found") };
+        }
+    };
+
+    // Validate individual condition with oracle
+    private func validateConditionWithOracle(condition: Condition): async Result.Result<Bool, Text> {
+        switch (oracles.get(condition.oracle)) {
+            case (?oracle) {
+                if (not oracle.isActive) {
+                    return #err("Oracle is not active");
+                };
+
+                // Update oracle last access time
+                let updatedOracle = {
+                    oracle with 
+                    lastUpdate = Time.now();
+                };
+                oracles.put(oracle.id, updatedOracle);
+
+                // For market data oracles (like CoinGecko), check price conditions
+                if (oracle.category == "Market Data") {
+                    return await validateMarketCondition(condition, oracle);
+                };
+
+                // For weather oracles, check weather conditions
+                if (oracle.category == "Weather") {
+                    return await validateWeatherCondition(condition, oracle);
+                };
+
+                // For development oracles (like GitHub), check repository conditions
+                if (oracle.category == "Development") {
+                    return await validateDevelopmentCondition(condition, oracle);
+                };
+
+                // Default validation for other oracle types
+                #ok(true)
+            };
+            case null { #err("Oracle not found") };
+        }
+    };
+
+    // Market data validation (e.g., Bitcoin price)
+    private func validateMarketCondition(condition: Condition, oracle: Oracle): async Result.Result<Bool, Text> {
+        switch (condition.conditionType) {
+            case ("price") {
+                let url = oracle.endpoint # "/simple/price?ids=bitcoin&vs_currencies=usd";
+                switch (await makeHttpRequest(url)) {
+                    case (#ok(response)) {
+                        // Simple price extraction (in production, use proper JSON parsing)
+                        if (Text.contains(response, #text "bitcoin")) {
+                            // Mock price validation - in production, parse JSON and compare
+                            switch (condition.operator) {
+                                case (">=") { #ok(true) };
+                                case ("<=") { #ok(true) };
+                                case ("==") { #ok(true) };
+                                case (_) { #err("Invalid operator") };
+                            }
+                        } else {
+                            #err("Failed to fetch price data")
+                        }
+                    };
+                    case (#err(msg)) { #err(msg) };
+                }
+            };
+            case (_) { #err("Unsupported market condition type") };
+        }
+    };
+
+    // Weather condition validation
+    private func validateWeatherCondition(condition: Condition, oracle: Oracle): async Result.Result<Bool, Text> {
+        switch (condition.conditionType) {
+            case ("temperature") {
+                let url = oracle.endpoint # "/weather?q=London&appid=demo";
+                switch (await makeHttpRequest(url)) {
+                    case (#ok(_response)) {
+                        // Mock weather validation - in production, parse weather data
+                        #ok(true)
+                    };
+                    case (#err(msg)) { #err(msg) };
+                }
+            };
+            case (_) { #err("Unsupported weather condition type") };
+        }
+    };
+
+    // Development condition validation (e.g., GitHub repository stats)
+    private func validateDevelopmentCondition(condition: Condition, oracle: Oracle): async Result.Result<Bool, Text> {
+        switch (condition.conditionType) {
+            case ("repository_stars") {
+                let url = oracle.endpoint # "/repos/" # condition.value;
+                switch (await makeHttpRequest(url)) {
+                    case (#ok(_response)) {
+                        // Mock GitHub validation - in production, parse repository data
+                        #ok(true)
+                    };
+                    case (#err(msg)) { #err(msg) };
+                }
+            };
+            case (_) { #err("Unsupported development condition type") };
         }
     };
 
@@ -289,10 +563,19 @@ actor PaymentStream {
 
     system func preupgrade() {
         streamEntries := Iter.toArray(streams.entries());
+        oracleEntries := Iter.toArray(oracles.entries());
     };
 
     system func postupgrade() {
         streams := HashMap.fromIter<Text, StreamConfig>(streamEntries.vals(), 0, Text.equal, Text.hash);
         streamEntries := [];
+        
+        oracles := HashMap.fromIter<Text, Oracle>(oracleEntries.vals(), 0, Text.equal, Text.hash);
+        oracleEntries := [];
+        
+        // Initialize default oracles if none exist
+        if (oracles.size() == 0) {
+            initializeOracles();
+        };
     };
 };

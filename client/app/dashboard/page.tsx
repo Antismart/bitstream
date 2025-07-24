@@ -183,13 +183,13 @@ export default function Dashboard() {
                       stroke="currentColor"
                       strokeWidth="4"
                       fill="none"
-                      strokeDasharray={`${streamStats.totalStreams > 0 ? (streamStats.activeStreams / streamStats.totalStreams * 100) * 1.75 : 0} ${100 * 1.75}`}
+                      strokeDasharray={`${Number(streamStats.totalStreams) > 0 ? (Number(streamStats.activeStreams) / Number(streamStats.totalStreams) * 100) * 1.75 : 0} ${100 * 1.75}`}
                       className="text-lime-400"
                     />
                   </svg>
                   <div className="absolute inset-0 flex items-center justify-center">
                     <span className="text-lg font-bold text-white">
-                      {streamStats.totalStreams > 0 ? Math.round((streamStats.activeStreams / streamStats.totalStreams) * 100) : 0}%
+                      {Number(streamStats.totalStreams) > 0 ? Math.round((Number(streamStats.activeStreams) / Number(streamStats.totalStreams)) * 100) : 0}%
                     </span>
                   </div>
                 </div>
@@ -230,7 +230,7 @@ export default function Dashboard() {
                           : "bg-gray-800 text-white/70 hover:bg-gray-700"
                       }`}
                     >
-                      {category} ({count})
+                      {category} ({Number(count)})
                     </Badge>
                   ))
                 ) : (
@@ -329,21 +329,21 @@ export default function Dashboard() {
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-sm text-white/60">Stream Progress</span>
                   <span className="text-sm text-white/60">
-                    {streamStats.totalStreams > 0 ? Math.round((streamStats.activeStreams / streamStats.totalStreams) * 100) : 0}% Active
+                    {Number(streamStats.totalStreams) > 0 ? Math.round((Number(streamStats.activeStreams) / Number(streamStats.totalStreams)) * 100) : 0}% Active
                   </span>
                 </div>
                 <div className="w-full bg-gray-800 rounded-full h-2">
                   <div 
                     className="bg-lime-400 h-2 rounded-full" 
                     style={{ 
-                      width: `${streamStats.totalStreams > 0 ? (streamStats.activeStreams / streamStats.totalStreams * 100) : 0}%` 
+                      width: `${Number(streamStats.totalStreams) > 0 ? (Number(streamStats.activeStreams) / Number(streamStats.totalStreams) * 100) : 0}%` 
                     }}
                   ></div>
                 </div>
                 <div className="flex justify-between mt-2">
-                  <div className={`w-3 h-3 rounded-full ${streamStats.activeStreams > 0 ? 'bg-lime-400' : 'bg-gray-600'}`}></div>
-                  <div className={`w-3 h-3 rounded-full ${streamStats.activeStreams > 1 ? 'bg-lime-400' : 'bg-gray-600'}`}></div>
-                  <div className={`w-3 h-3 rounded-full ${streamStats.activeStreams > 2 ? 'bg-lime-400' : 'bg-gray-600'}`}></div>
+                  <div className={`w-3 h-3 rounded-full ${Number(streamStats.activeStreams) > 0 ? 'bg-lime-400' : 'bg-gray-600'}`}></div>
+                  <div className={`w-3 h-3 rounded-full ${Number(streamStats.activeStreams) > 1 ? 'bg-lime-400' : 'bg-gray-600'}`}></div>
+                  <div className={`w-3 h-3 rounded-full ${Number(streamStats.activeStreams) > 2 ? 'bg-lime-400' : 'bg-gray-600'}`}></div>
                 </div>
               </div>
 

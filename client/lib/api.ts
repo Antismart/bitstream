@@ -135,10 +135,8 @@ const IC_HOST = DFX_NETWORK === "local" ? "http://127.0.0.1:4943" : "https://icp
 // Canister IDs
 const CANISTER_ID_SERVER = process.env.NEXT_PUBLIC_CANISTER_ID_SERVER || "rrkah-fqaaa-aaaaa-aaaaq-cai";
 
-// Internet Identity configuration
-const IDENTITY_PROVIDER = DFX_NETWORK === "local" 
-  ? `http://rdmx6-jaaaa-aaaaa-aaadq-cai.localhost:4943`
-  : "https://identity.ic0.app";
+// Internet Identity configuration - ALWAYS use production Internet Identity
+const IDENTITY_PROVIDER = "https://identity.ic0.app";
 
 // Authentication configuration
 const AUTH_MAX_TIME_TO_LIVE = BigInt(7 * 24 * 60 * 60 * 1000 * 1000 * 1000); // 7 days in nanoseconds

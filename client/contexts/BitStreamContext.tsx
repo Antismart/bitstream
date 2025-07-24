@@ -124,8 +124,8 @@ export function BitStreamProvider({ children }: { children: React.ReactNode }) {
     monthly: "0"
   })
   const [streamStats, setStreamStats] = useState<StreamStats>({
-    totalStreams: 0,
-    activeStreams: 0,
+    totalStreams: BigInt(0),
+    activeStreams: BigInt(0),
     totalVolume: "0",
     categories: []
   })

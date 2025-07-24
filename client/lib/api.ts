@@ -11,6 +11,19 @@ export interface Condition {
   oracle: string;
 }
 
+export interface Oracle {
+  id: string;
+  name: string;
+  endpoint: string;
+  category: string;
+  status: string;
+  uptime: string;
+  lastUpdate: bigint;
+  feeds: bigint;
+  apiKey: string | null;
+  isActive: boolean;
+}
+
 export interface StreamConfig {
   id: string;
   name: string;
@@ -41,10 +54,10 @@ export interface UserBalance {
 }
 
 export interface StreamStats {
-  totalStreams: number;
-  activeStreams: number;
+  totalStreams: bigint;
+  activeStreams: bigint;
   totalVolume: string;
-  categories: [string, number][];
+  categories: [string, bigint][];
 }
 
 // IDL for the PaymentStream actor
@@ -93,6 +106,19 @@ const idlFactory = ({ IDL }: any) => {
     'categories': IDL.Vec(IDL.Tuple(IDL.Text, IDL.Nat)),
   });
 
+  const Oracle = IDL.Record({
+    'id': IDL.Text,
+    'name': IDL.Text,
+    'endpoint': IDL.Text,
+    'category': IDL.Text,
+    'status': IDL.Text,
+    'uptime': IDL.Text,
+    'lastUpdate': IDL.Int,
+    'feeds': IDL.Nat,
+    'apiKey': IDL.Opt(IDL.Text),
+    'isActive': IDL.Bool,
+  });
+
   const Result = IDL.Variant({
     'ok': IDL.Text,
     'err': IDL.Text,
@@ -113,6 +139,11 @@ const idlFactory = ({ IDL }: any) => {
     'err': IDL.Text,
   });
 
+  const ResultOracle = IDL.Variant({
+    'ok': Oracle,
+    'err': IDL.Text,
+  });
+
   return IDL.Service({
     'createStream': IDL.Func([StreamConfig], [Result], []),
     'getStream': IDL.Func([IDL.Text], [ResultStream], ['query']),
@@ -122,18 +153,22 @@ const idlFactory = ({ IDL }: any) => {
     'validateConditions': IDL.Func([IDL.Text], [ResultBool], []),
     'getUserBalance': IDL.Func([IDL.Principal], [UserBalance], ['query']),
     'getStreamStats': IDL.Func([IDL.Principal], [StreamStats], ['query']),
+    'getOracles': IDL.Func([], [IDL.Vec(Oracle)], ['query']),
+    'getOracle': IDL.Func([IDL.Text], [ResultOracle], ['query']),
+    'addOracle': IDL.Func([Oracle], [Result], []),
+    'updateOracleStatus': IDL.Func([IDL.Text, IDL.Text], [ResultVoid], []),
   });
 };
 
 // Configuration following IC authentication best practices
-const isDevelopment = process.env.NODE_ENV !== 'production';
+const isDevelopment = false; // Force production mode for mainnet
 
 // Network configuration
-const DFX_NETWORK = process.env.DFX_NETWORK || (isDevelopment ? "local" : "ic");
-const IC_HOST = DFX_NETWORK === "local" ? "http://127.0.0.1:4943" : "https://icp-api.io";
+const DFX_NETWORK = "ic"; // Force IC network
+const IC_HOST = "https://ic0.app"; // Force IC host
 
-// Canister IDs
-const CANISTER_ID_SERVER = process.env.NEXT_PUBLIC_CANISTER_ID_SERVER || "rrkah-fqaaa-aaaaa-aaaaq-cai";
+// Canister IDs - force to use the correct mainnet canister ID
+const CANISTER_ID_SERVER = "wbyay-dyaaa-aaaag-aue3q-cai";
 
 // Internet Identity configuration - ALWAYS use production Internet Identity
 const IDENTITY_PROVIDER = "https://identity.ic0.app";
@@ -156,6 +191,9 @@ class BitStreamAPI {
       console.log('Host:', IC_HOST);
       console.log('Canister ID:', CANISTER_ID_SERVER);
       console.log('Identity Provider:', IDENTITY_PROVIDER);
+      console.log('process.env.NEXT_PUBLIC_CANISTER_ID_SERVER:', process.env.NEXT_PUBLIC_CANISTER_ID_SERVER);
+      console.log('process.env.DFX_NETWORK:', process.env.DFX_NETWORK);
+      console.log('process.env.NODE_ENV:', process.env.NODE_ENV);
 
       // Create auth client with proper configuration
       this.authClient = await AuthClient.create({
@@ -180,27 +218,13 @@ class BitStreamAPI {
         identity: this.identity || undefined
       });
 
-      // Fetch root key for local development
-      if (DFX_NETWORK === "local") {
-        try {
-          console.log('Fetching root key for local development...');
-          await this.agent.fetchRootKey();
-          console.log('Root key fetched successfully');
-        } catch (error) {
-          console.warn('Failed to fetch root key, enabling mock mode:', error);
-          this.mockMode = true;
-        }
-      }
+      // Create actor for IC network
+      this.actor = Actor.createActor(idlFactory, {
+        agent: this.agent,
+        canisterId: CANISTER_ID_SERVER,
+      });
 
-      // Create actor if not in mock mode
-      if (!this.mockMode) {
-        this.actor = Actor.createActor(idlFactory, {
-          agent: this.agent,
-          canisterId: CANISTER_ID_SERVER,
-        });
-      }
-
-      console.log('BitStream API initialized successfully', this.mockMode ? '(Mock Mode)' : '');
+      console.log('BitStream API initialized successfully for IC mainnet');
     } catch (error) {
       console.error('Failed to initialize BitStream API:', error);
       console.log('Enabling mock mode for development');
@@ -275,10 +299,7 @@ class BitStreamAPI {
         identity: this.identity || undefined
       });
 
-      if (DFX_NETWORK === "local") {
-        await this.agent.fetchRootKey();
-      }
-
+      // Create actor for IC mainnet
       this.actor = Actor.createActor(idlFactory, {
         agent: this.agent,
         canisterId: CANISTER_ID_SERVER,
@@ -359,10 +380,10 @@ class BitStreamAPI {
 
   private getMockStats(): StreamStats {
     return {
-      totalStreams: 2,
-      activeStreams: 1,
+      totalStreams: BigInt(2),
+      activeStreams: BigInt(1),
       totalVolume: "45.321",
-      categories: [["Housing", 1], ["Investment", 1]]
+      categories: [["Housing", BigInt(1)], ["Investment", BigInt(1)]]
     };
   }
 
@@ -443,13 +464,124 @@ class BitStreamAPI {
     const principal = await this.getPrincipal();
     if (!principal) {
       return {
-        totalStreams: 0,
-        activeStreams: 0,
+        totalStreams: BigInt(0),
+        activeStreams: BigInt(0),
         totalVolume: "0",
         categories: []
       };
     }
     return await this.actor.getStreamStats(principal);
+  }
+
+  // Oracle API Methods
+  async getOracles(): Promise<Oracle[]> {
+    console.log('getOracles called, mockMode:', this.mockMode)
+    if (this.mockMode) {
+      console.log('Using mock oracles data');
+      return this.getMockOracles();
+    }
+    
+    if (!this.actor) {
+      console.log('No actor found, initializing...')
+      await this.init();
+    }
+    
+    console.log('Calling actor.getOracles...')
+    const result = await this.actor.getOracles();
+    console.log('Actor getOracles result:', result)
+    return result;
+  }
+
+  async getOracle(oracleId: string): Promise<{ ok?: Oracle; err?: string }> {
+    if (!this.actor) await this.init();
+    return await this.actor.getOracle(oracleId);
+  }
+
+  async addOracle(oracle: Oracle): Promise<{ ok?: string; err?: string }> {
+    if (!this.actor) await this.init();
+    return await this.actor.addOracle(oracle);
+  }
+
+  async updateOracleStatus(oracleId: string, status: string): Promise<{ ok?: null; err?: string }> {
+    if (!this.actor) await this.init();
+    return await this.actor.updateOracleStatus(oracleId, status);
+  }
+
+  private getMockOracles(): Oracle[] {
+    return [
+      {
+        id: "oracle-1",
+        name: "CoinGecko",
+        endpoint: "https://api.coingecko.com/api/v3",
+        category: "Market Data",
+        status: "active",
+        uptime: "99.8%",
+        lastUpdate: BigInt(Date.now() * 1000000),
+        feeds: BigInt(8),
+        apiKey: null,
+        isActive: true
+      },
+      {
+        id: "oracle-2", 
+        name: "GitHub API",
+        endpoint: "https://api.github.com",
+        category: "Development",
+        status: "active",
+        uptime: "99.9%",
+        lastUpdate: BigInt(Date.now() * 1000000),
+        feeds: BigInt(5),
+        apiKey: null,
+        isActive: true
+      },
+      {
+        id: "oracle-3",
+        name: "Weather API",
+        endpoint: "https://api.openweathermap.org/data/2.5",
+        category: "Weather", 
+        status: "active",
+        uptime: "99.2%",
+        lastUpdate: BigInt(Date.now() * 1000000),
+        feeds: BigInt(4),
+        apiKey: null,
+        isActive: true
+      },
+      {
+        id: "oracle-4",
+        name: "FlightAware",
+        endpoint: "https://flightxml.flightaware.com",
+        category: "Travel",
+        status: "active",
+        uptime: "98.5%",
+        lastUpdate: BigInt(Date.now() * 1000000),
+        feeds: BigInt(3),
+        apiKey: null,
+        isActive: true
+      },
+      {
+        id: "oracle-5",
+        name: "Sports Data",
+        endpoint: "https://api.sportsdata.io",
+        category: "Sports",
+        status: "maintenance",
+        uptime: "95.1%",
+        lastUpdate: BigInt(Date.now() * 1000000),
+        feeds: BigInt(2),
+        apiKey: null,
+        isActive: false
+      },
+      {
+        id: "oracle-6",
+        name: "News Sentiment",
+        endpoint: "https://newsapi.org",
+        category: "News",
+        status: "active",
+        uptime: "97.8%",
+        lastUpdate: BigInt(Date.now() * 1000000),
+        feeds: BigInt(2),
+        apiKey: null,
+        isActive: true
+      }
+    ];
   }
 }
 

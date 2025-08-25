@@ -2,14 +2,17 @@
 
 import React, { createContext, useContext, useEffect, useState } from "react"
 import { Principal } from "@dfinity/principal"
-import { bitStreamAPI, StreamConfig, UserBalance, StreamStats } from "@/lib/api"
+import { useIdentityKit } from "@nfid/identitykit/react"
+import { bitStreamAPI, StreamConfig, UserBalance, StreamStats, WalletType } from "@/lib/api"
 
 interface AuthContextType {
   isAuthenticated: boolean
   principal: Principal | null
-  login: () => Promise<boolean>
+  walletType: WalletType | null
+  login: (walletType?: WalletType) => Promise<boolean>
   logout: () => Promise<void>
   loading: boolean
+  accounts: any[] | null
 }
 
 interface BitStreamContextType extends AuthContextType {
@@ -17,6 +20,7 @@ interface BitStreamContextType extends AuthContextType {
   streams: StreamConfig[]
   createStream: (config: any) => Promise<{ success: boolean; error?: string; streamId?: string }>
   updateStreamStatus: (streamId: string, status: string) => Promise<{ success: boolean; error?: string }>
+  executePayment: (streamId: string) => Promise<{ success: boolean; error?: string; paymentId?: string }>
   refreshStreams: () => Promise<void>
   
   // Analytics
@@ -24,90 +28,16 @@ interface BitStreamContextType extends AuthContextType {
   streamStats: StreamStats
   refreshAnalytics: () => Promise<void>
   
+  // ICRC-2 Approval functions
+  approveCanister: (amountSatoshis: number) => Promise<{ success: boolean; error?: string; blockIndex?: number }>
+  getAllowance: () => Promise<number>
+  
   // Loading states
   streamsLoading: boolean
   analyticsLoading: boolean
 }
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined)
 const BitStreamContext = createContext<BitStreamContextType | undefined>(undefined)
-
-export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [principal, setPrincipal] = useState<Principal | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    checkAuth()
-  }, [])
-
-  async function checkAuth() {
-    try {
-      console.log('Checking authentication status...');
-      
-      // Initialize API if not already done
-      await bitStreamAPI.init()
-      
-      const authenticated = await bitStreamAPI.isAuthenticated()
-      console.log('Authentication status:', authenticated);
-      setIsAuthenticated(authenticated)
-      
-      if (authenticated) {
-        const userPrincipal = await bitStreamAPI.getPrincipal()
-        console.log('User principal:', userPrincipal?.toString());
-        setPrincipal(userPrincipal)
-      } else {
-        setPrincipal(null)
-      }
-    } catch (error) {
-      console.error("Auth check failed:", error)
-      setIsAuthenticated(false)
-      setPrincipal(null)
-    }
-    setLoading(false)
-  }
-
-  async function login(): Promise<boolean> {
-    try {
-      console.log('Attempting to login...');
-      const success = await bitStreamAPI.login()
-      console.log('Login result:', success);
-      
-      if (success) {
-        // Re-check authentication status after successful login
-        await checkAuth()
-      } else {
-        console.log('Login failed');
-      }
-      return success
-    } catch (error) {
-      console.error("Login failed:", error)
-      return false
-    }
-  }
-
-  async function logout() {
-    try {
-      await bitStreamAPI.logout()
-      setIsAuthenticated(false)
-      setPrincipal(null)
-    } catch (error) {
-      console.error("Logout failed:", error)
-    }
-  }
-
-  return (
-    <AuthContext.Provider value={{
-      isAuthenticated,
-      principal,
-      login,
-      logout,
-      loading
-    }}>
-      {children}
-    </AuthContext.Provider>
-  )
-}
 
 export function BitStreamProvider({ children }: { children: React.ReactNode }) {
   const auth = useAuth()
@@ -203,16 +133,60 @@ export function BitStreamProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
+  async function executePayment(streamId: string): Promise<{ success: boolean; error?: string; paymentId?: string }> {
+    try {
+      const result = await bitStreamAPI.executePayment(streamId)
+      
+      if (result.ok) {
+        await refreshStreams() // Refresh the streams list
+        await refreshAnalytics() // Refresh analytics
+        return { success: true, paymentId: result.ok }
+      } else {
+        return { success: false, error: result.err || "Unknown error" }
+      }
+    } catch (error) {
+      console.error("Failed to execute payment:", error)
+      return { success: false, error: "Network error" }
+    }
+  }
+
+  async function approveCanister(amountSatoshis: number): Promise<{ success: boolean; error?: string; blockIndex?: number }> {
+    try {
+      const result = await bitStreamAPI.approveCanister(amountSatoshis)
+      
+      if (result.ok !== undefined) {
+        return { success: true, blockIndex: result.ok }
+      } else {
+        return { success: false, error: result.err || "Unknown error" }
+      }
+    } catch (error) {
+      console.error("Failed to approve canister:", error)
+      return { success: false, error: "Network error" }
+    }
+  }
+
+  async function getAllowance(): Promise<number> {
+    try {
+      return await bitStreamAPI.getAllowance()
+    } catch (error) {
+      console.error("Failed to get allowance:", error)
+      return 0
+    }
+  }
+
   return (
     <BitStreamContext.Provider value={{
       ...auth,
       streams,
       createStream,
       updateStreamStatus,
+      executePayment,
       refreshStreams,
       userBalance,
       streamStats,
       refreshAnalytics,
+      approveCanister,
+      getAllowance,
       streamsLoading,
       analyticsLoading
     }}>
@@ -221,12 +195,91 @@ export function BitStreamProvider({ children }: { children: React.ReactNode }) {
   )
 }
 
-export function useAuth() {
-  const context = useContext(AuthContext)
-  if (context === undefined) {
-    throw new Error("useAuth must be used within an AuthProvider")
+// Enhanced authentication hook with IdentityKit support
+function useAuth() {
+  const identityKit = useIdentityKit()
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [principal, setPrincipal] = useState<Principal | null>(null)
+  const [walletType, setWalletType] = useState<WalletType | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    checkAuth()
+  }, [identityKit?.user?.principal, identityKit?.identity])
+
+  async function checkAuth() {
+    try {
+      console.log('Checking authentication status...');
+      
+      // Check IdentityKit first (primary method)
+      if (identityKit?.user?.principal) {
+        console.log('IdentityKit user found');
+        setIsAuthenticated(true)
+        setPrincipal(identityKit.user.principal)
+        setWalletType('identitykit')
+        
+        // Update the API with IdentityKit identity
+        if (identityKit.identity) {
+          bitStreamAPI['identity'] = identityKit.identity
+          bitStreamAPI['currentWalletType'] = 'identitykit'
+          await bitStreamAPI['updateActor']()
+        }
+      } else {
+        // No authentication found
+        setIsAuthenticated(false)
+        setPrincipal(null)
+        setWalletType(null)
+      }
+    } catch (error) {
+      console.error("Auth check failed:", error)
+      setIsAuthenticated(false)
+      setPrincipal(null)
+      setWalletType(null)
+    }
+    setLoading(false)
   }
-  return context
+
+  const login = async (walletType: WalletType = 'identitykit'): Promise<boolean> => {
+    try {
+      console.log('Attempting to login with IdentityKit');
+      
+      if (identityKit?.connect) {
+        await identityKit.connect()
+        await checkAuth()
+        return isAuthenticated
+      } else {
+        console.error('IdentityKit not available');
+        return false
+      }
+    } catch (error) {
+      console.error("Login failed:", error)
+      return false
+    }
+  }
+
+  const logout = async () => {
+    try {
+      if (identityKit?.disconnect) {
+        await identityKit.disconnect()
+      }
+      
+      setIsAuthenticated(false)
+      setPrincipal(null)
+      setWalletType(null)
+    } catch (error) {
+      console.error("Logout failed:", error)
+    }
+  }
+
+  return {
+    isAuthenticated,
+    principal,
+    walletType,
+    login,
+    logout,
+    loading,
+    accounts: identityKit?.accounts || null
+  }
 }
 
 export function useBitStream() {

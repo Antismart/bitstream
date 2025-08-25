@@ -6,9 +6,8 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
-import { Switch } from "@/components/ui/switch"
 import { Progress } from "@/components/ui/progress"
-import { ArrowLeft, ArrowRight, Bitcoin, Plus, Settings, CheckCircle, Loader2 } from "lucide-react"
+import { ArrowLeft, ArrowRight, Settings, CheckCircle, Loader2 } from "lucide-react"
 import Link from "next/link"
 import { useBitStream } from "@/contexts/BitStreamContext"
 import { useRouter } from "next/navigation"
@@ -25,13 +24,6 @@ interface StreamConfig {
   recipientType: string
   recipientAddress: string
   recipientEmail: string
-  conditions: Array<{
-    id: string
-    type: string
-    operator: string
-    value: string
-    oracle: string
-  }>
   maxAmount: string
   failureHandling: string
   notifications: boolean
@@ -55,13 +47,12 @@ export default function CreateStreamPage() {
     recipientType: "",
     recipientAddress: "",
     recipientEmail: "",
-    conditions: [],
-    maxAmount: "",
-    failureHandling: "pause",
-    notifications: true,
+    maxAmount: "0", // Default to no limit
+    failureHandling: "pause", // Default behavior
+    notifications: false, // Default to no notifications
   })
 
-  const totalSteps = 3 // Simplified to 3 steps for now
+  const totalSteps = 2 // Simplified to 2 steps: Basic Info + Recipient
   const progress = (currentStep / totalSteps) * 100
 
   const updateConfig = (field: string, value: any) => {
@@ -83,11 +74,9 @@ export default function CreateStreamPage() {
   const canProceed = () => {
     switch (currentStep) {
       case 1:
-        return streamConfig.name && streamConfig.category
+        return streamConfig.name && streamConfig.category && streamConfig.amount && streamConfig.frequency
       case 2:
-        return streamConfig.amount && streamConfig.frequency
-      case 3:
-        return streamConfig.recipientType && (streamConfig.recipientAddress || streamConfig.recipientEmail)
+        return streamConfig.recipientAddress
       default:
         return false
     }
@@ -108,7 +97,6 @@ export default function CreateStreamPage() {
         recipientType: streamConfig.recipientType,
         recipientAddress: streamConfig.recipientAddress,
         recipientEmail: streamConfig.recipientEmail,
-        conditions: [],
         maxAmount: streamConfig.maxAmount,
         failureHandling: streamConfig.failureHandling,
         notifications: streamConfig.notifications,
@@ -128,7 +116,7 @@ export default function CreateStreamPage() {
 
   return (
     <div className="min-h-screen bg-black text-white p-6">
-      <div className="max-w-4xl mx-auto">
+      <div className="max-w-4xl mx-auto space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center space-x-4">
@@ -156,9 +144,8 @@ export default function CreateStreamPage() {
             </div>
             <Progress value={progress} className="w-full" />
             <div className="flex justify-between mt-4 text-sm">
-              <span className={currentStep >= 1 ? "text-lime-400" : "text-white/40"}>Basic Info</span>
-              <span className={currentStep >= 2 ? "text-lime-400" : "text-white/40"}>Payment Details</span>
-              <span className={currentStep >= 3 ? "text-lime-400" : "text-white/40"}>Recipient</span>
+              <span className={currentStep >= 1 ? "text-lime-400" : "text-white/40"}>Stream Details</span>
+              <span className={currentStep >= 2 ? "text-lime-400" : "text-white/40"}>Recipient</span>
             </div>
           </CardContent>
         </Card>
@@ -166,12 +153,12 @@ export default function CreateStreamPage() {
         {/* Step Content */}
         <Card className="bg-gray-900 border-gray-800">
           <CardContent className="p-8">
-            {/* Step 1: Basic Information */}
+            {/* Step 1: Stream Details */}
             {currentStep === 1 && (
               <div className="space-y-6">
                 <div className="flex items-center space-x-3 mb-6">
                   <Settings className="h-6 w-6 text-lime-400" />
-                  <h3 className="text-xl font-semibold text-white">Basic Information</h3>
+                  <h3 className="text-xl font-semibold text-white">Stream Details</h3>
                 </div>
 
                 <div className="grid grid-cols-2 gap-6">
@@ -214,16 +201,6 @@ export default function CreateStreamPage() {
                     className="bg-gray-800 border-gray-600 text-white"
                   />
                 </div>
-              </div>
-            )}
-
-            {/* Step 2: Payment Details */}
-            {currentStep === 2 && (
-              <div className="space-y-6">
-                <div className="flex items-center space-x-3 mb-6">
-                  <Bitcoin className="h-6 w-6 text-lime-400" />
-                  <h3 className="text-xl font-semibold text-white">Payment Details</h3>
-                </div>
 
                 <div className="grid grid-cols-3 gap-6">
                   <div>
@@ -245,8 +222,7 @@ export default function CreateStreamPage() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="BTC">Bitcoin (BTC)</SelectItem>
-                        <SelectItem value="SATS">Satoshis</SelectItem>
+                        <SelectItem value="BTC">ckBTC</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -292,8 +268,8 @@ export default function CreateStreamPage() {
               </div>
             )}
 
-            {/* Step 3: Recipient */}
-            {currentStep === 3 && (
+            {/* Step 2: Recipient */}
+            {currentStep === 2 && (
               <div className="space-y-6">
                 <div className="flex items-center space-x-3 mb-6">
                   <Settings className="h-6 w-6 text-lime-400" />
@@ -301,45 +277,20 @@ export default function CreateStreamPage() {
                 </div>
 
                 <div>
-                  <label className="text-sm text-white/60 mb-2 block">Recipient Type *</label>
-                  <Select
-                    value={streamConfig.recipientType}
-                    onValueChange={(value) => updateConfig("recipientType", value)}
-                  >
-                    <SelectTrigger className="bg-gray-800 border-gray-600 text-white">
-                      <SelectValue placeholder="Select recipient type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="address">Bitcoin Address</SelectItem>
-                      <SelectItem value="email">Email Address</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <label className="text-sm text-white/60 mb-2 block">Recipient Principal *</label>
+                  <Input
+                    placeholder="rdmx6-jaaaa-aaaaa-aaadq-cai"
+                    value={streamConfig.recipientAddress}
+                    onChange={(e) => {
+                      updateConfig("recipientAddress", e.target.value);
+                      updateConfig("recipientType", "address"); // Set default type
+                    }}
+                    className="bg-gray-800 border-gray-600 text-white"
+                  />
+                  <p className="text-xs text-white/40 mt-1">
+                    Enter the recipient's Internet Computer principal ID
+                  </p>
                 </div>
-
-                {streamConfig.recipientType === "address" && (
-                  <div>
-                    <label className="text-sm text-white/60 mb-2 block">Bitcoin Address *</label>
-                    <Input
-                      placeholder="bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh"
-                      value={streamConfig.recipientAddress}
-                      onChange={(e) => updateConfig("recipientAddress", e.target.value)}
-                      className="bg-gray-800 border-gray-600 text-white"
-                    />
-                  </div>
-                )}
-
-                {streamConfig.recipientType === "email" && (
-                  <div>
-                    <label className="text-sm text-white/60 mb-2 block">Email Address *</label>
-                    <Input
-                      placeholder="recipient@example.com"
-                      type="email"
-                      value={streamConfig.recipientEmail}
-                      onChange={(e) => updateConfig("recipientEmail", e.target.value)}
-                      className="bg-gray-800 border-gray-600 text-white"
-                    />
-                  </div>
-                )}
 
                 {/* Review Section */}
                 <Card className="bg-gray-800 border-gray-700 mt-6">

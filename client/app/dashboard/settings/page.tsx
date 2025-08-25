@@ -8,7 +8,8 @@ import { User, Shield, Bell, Wallet, Globe, Key, Smartphone, Mail } from "lucide
 
 export default function SettingsPage() {
   return (
-    <div className="space-y-6">
+    <div className="min-h-screen bg-black text-white p-6">
+      <div className="max-w-6xl mx-auto space-y-6">
       {/* Header */}
       <div>
         <h1 className="text-3xl font-bold text-white mb-2">Settings</h1>
@@ -130,7 +131,7 @@ export default function SettingsPage() {
                 </div>
                 <div className="flex items-center justify-between">
                   <div>
-                    <div className="font-medium text-white">Oracle Updates</div>
+                    <div className="font-medium text-white">Stream Updates</div>
                     <div className="text-sm text-white/60">Notifications about data source changes</div>
                   </div>
                   <Switch defaultChecked />
@@ -225,6 +226,7 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
         </div>
+      </div>
       </div>
     </div>
   )

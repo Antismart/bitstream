@@ -3,27 +3,6 @@ import { AuthClient } from "@dfinity/auth-client";
 import { Principal } from "@dfinity/principal";
 
 // Types matching the Motoko backend
-export interface Condition {
-  id: string;
-  conditionType: string;
-  operator: string;
-  value: string;
-  oracle: string;
-}
-
-export interface Oracle {
-  id: string;
-  name: string;
-  endpoint: string;
-  category: string;
-  status: string;
-  uptime: string;
-  lastUpdate: bigint;
-  feeds: bigint;
-  apiKey: string | null;
-  isActive: boolean;
-}
-
 export interface StreamConfig {
   id: string;
   name: string;
@@ -37,13 +16,14 @@ export interface StreamConfig {
   recipientType: string;
   recipientAddress: string;
   recipientEmail: string;
-  conditions: Condition[];
   maxAmount: string;
   failureHandling: string;
   notifications: boolean;
   creator: Principal;
   createdAt: bigint;
   status: string;
+  lastExecution?: bigint;
+  nextExecution?: bigint;
 }
 
 export interface UserBalance {
@@ -62,14 +42,6 @@ export interface StreamStats {
 
 // IDL for the PaymentStream actor
 const idlFactory = ({ IDL }: any) => {
-  const Condition = IDL.Record({
-    'id': IDL.Text,
-    'conditionType': IDL.Text,
-    'operator': IDL.Text,
-    'value': IDL.Text,
-    'oracle': IDL.Text,
-  });
-
   const StreamConfig = IDL.Record({
     'id': IDL.Text,
     'name': IDL.Text,
@@ -83,13 +55,14 @@ const idlFactory = ({ IDL }: any) => {
     'recipientType': IDL.Text,
     'recipientAddress': IDL.Text,
     'recipientEmail': IDL.Text,
-    'conditions': IDL.Vec(Condition),
     'maxAmount': IDL.Text,
     'failureHandling': IDL.Text,
     'notifications': IDL.Bool,
     'creator': IDL.Principal,
     'createdAt': IDL.Int,
     'status': IDL.Text,
+    'lastExecution': IDL.Opt(IDL.Int),
+    'nextExecution': IDL.Opt(IDL.Int),
   });
 
   const UserBalance = IDL.Record({
@@ -104,19 +77,6 @@ const idlFactory = ({ IDL }: any) => {
     'activeStreams': IDL.Nat,
     'totalVolume': IDL.Text,
     'categories': IDL.Vec(IDL.Tuple(IDL.Text, IDL.Nat)),
-  });
-
-  const Oracle = IDL.Record({
-    'id': IDL.Text,
-    'name': IDL.Text,
-    'endpoint': IDL.Text,
-    'category': IDL.Text,
-    'status': IDL.Text,
-    'uptime': IDL.Text,
-    'lastUpdate': IDL.Int,
-    'feeds': IDL.Nat,
-    'apiKey': IDL.Opt(IDL.Text),
-    'isActive': IDL.Bool,
   });
 
   const Result = IDL.Variant({
@@ -139,11 +99,6 @@ const idlFactory = ({ IDL }: any) => {
     'err': IDL.Text,
   });
 
-  const ResultOracle = IDL.Variant({
-    'ok': Oracle,
-    'err': IDL.Text,
-  });
-
   return IDL.Service({
     'createStream': IDL.Func([StreamConfig], [Result], []),
     'getStream': IDL.Func([IDL.Text], [ResultStream], ['query']),
@@ -151,12 +106,14 @@ const idlFactory = ({ IDL }: any) => {
     'getAllStreams': IDL.Func([], [IDL.Vec(StreamConfig)], ['query']),
     'updateStreamStatus': IDL.Func([IDL.Text, IDL.Text], [ResultVoid], []),
     'validateConditions': IDL.Func([IDL.Text], [ResultBool], []),
-    'getUserBalance': IDL.Func([IDL.Principal], [UserBalance], ['query']),
+    'getUserBalance': IDL.Func([IDL.Principal], [UserBalance], []),
     'getStreamStats': IDL.Func([IDL.Principal], [StreamStats], ['query']),
-    'getOracles': IDL.Func([], [IDL.Vec(Oracle)], ['query']),
-    'getOracle': IDL.Func([IDL.Text], [ResultOracle], ['query']),
-    'addOracle': IDL.Func([Oracle], [Result], []),
-    'updateOracleStatus': IDL.Func([IDL.Text, IDL.Text], [ResultVoid], []),
+    'getCkBTCInfo': IDL.Func([], [IDL.Variant({'ok': IDL.Record({'name': IDL.Text, 'symbol': IDL.Text, 'decimals': IDL.Nat8, 'fee': IDL.Nat}), 'err': IDL.Text})], []),
+    'executePayment': IDL.Func([IDL.Text], [Result], []),
+    'approveCanister': IDL.Func([IDL.Nat], [IDL.Variant({'ok': IDL.Nat, 'err': IDL.Text})], []),
+    'getAllowance': IDL.Func([], [IDL.Nat], []),
+    'getCanisterAddress': IDL.Func([], [IDL.Text], ['query']),
+    'getCanisterBalance': IDL.Func([], [IDL.Nat], []),
   });
 };
 
@@ -168,20 +125,27 @@ const DFX_NETWORK = "ic"; // Force IC network
 const IC_HOST = "https://ic0.app"; // Force IC host
 
 // Canister IDs - force to use the correct mainnet canister ID
-const CANISTER_ID_SERVER = "wbyay-dyaaa-aaaag-aue3q-cai";
+const CANISTER_ID_SERVER = "35epn-uiaaa-aaaag-aufsq-cai";
 
 // Internet Identity configuration - ALWAYS use production Internet Identity
 const IDENTITY_PROVIDER = "https://identity.ic0.app";
 
+// IdentityKit configuration
+// No specific URL needed as IdentityKit handles wallet discovery
+
 // Authentication configuration
 const AUTH_MAX_TIME_TO_LIVE = BigInt(7 * 24 * 60 * 60 * 1000 * 1000 * 1000); // 7 days in nanoseconds
 
+// Wallet types - IdentityKit supports multiple wallets
+export type WalletType = 'internet-identity' | 'identitykit';
+
 class BitStreamAPI {
   private authClient: AuthClient | null = null;
+  private identityKitProvider: any = null;
   private actor: any = null;
   private agent: HttpAgent | null = null;
-  private mockMode: boolean = false;
   private identity: Identity | null = null;
+  private currentWalletType: WalletType | null = null;
 
   async init() {
     try {
@@ -212,10 +176,12 @@ class BitStreamAPI {
         console.log('Already authenticated with principal:', this.identity.getPrincipal().toString());
       }
 
-      // Create agent
-      this.agent = new HttpAgent({ 
+      // Create agent with proper configuration
+      this.agent = await HttpAgent.create({
         host: IC_HOST,
-        identity: this.identity || undefined
+        identity: this.identity || undefined,
+        retryTimes: 3,
+        verifyQuerySignatures: false // Disable for better compatibility with wallets
       });
 
       // Create actor for IC network
@@ -227,12 +193,21 @@ class BitStreamAPI {
       console.log('BitStream API initialized successfully for IC mainnet');
     } catch (error) {
       console.error('Failed to initialize BitStream API:', error);
-      console.log('Enabling mock mode for development');
-      this.mockMode = true;
+      console.log('API initialization failed - will show empty states');
+      // Don't enable mock mode - let the UI show empty states instead
     }
   }
 
-  async login(): Promise<boolean> {
+  async login(walletType: WalletType = 'internet-identity'): Promise<boolean> {
+    if (walletType === 'internet-identity') {
+      return this.loginWithInternetIdentity();
+    } else if (walletType === 'identitykit') {
+      return this.loginWithIdentityKit();
+    }
+    return false;
+  }
+
+  private async loginWithInternetIdentity(): Promise<boolean> {
     if (!this.authClient) await this.init();
 
     return new Promise((resolve) => {
@@ -241,31 +216,60 @@ class BitStreamAPI {
         maxTimeToLive: AUTH_MAX_TIME_TO_LIVE,
         windowOpenerFeatures: "toolbar=0,location=0,menubar=0,width=500,height=500,left=100,top=100",
         onSuccess: async () => {
-          console.log('Login successful, updating identity and actor...');
+          console.log('Internet Identity login successful...');
           this.identity = this.authClient!.getIdentity();
+          this.currentWalletType = 'internet-identity';
           console.log('New identity principal:', this.identity.getPrincipal().toString());
           await this.updateActor();
           resolve(true);
         },
         onError: (error) => {
-          console.error("Login error:", error);
+          console.error("Internet Identity login error:", error);
           resolve(false);
         },
       });
     });
   }
 
-  async logout() {
-    if (this.authClient) {
-      await this.authClient.logout();
-      this.identity = null;
-      await this.updateActor();
+  private async loginWithIdentityKit(): Promise<boolean> {
+    try {
+      console.log('Connecting with IdentityKit...');
+      
+      // This method will be implemented after we update the context to use IdentityKit
+      // The actual connection logic will be handled by IdentityKit provider
+      console.warn('IdentityKit connection should be handled by IdentityKitProvider');
+      return false;
+    } catch (error: any) {
+      console.error('IdentityKit connection failed:', error);
+      return false;
     }
   }
 
+  async logout() {
+    if (this.currentWalletType === 'internet-identity' && this.authClient) {
+      await this.authClient.logout();
+    } else if (this.currentWalletType === 'identitykit' && this.identityKitProvider) {
+      // IdentityKit logout will be handled by the provider
+      this.identityKitProvider = null;
+    }
+    
+    this.identity = null;
+    this.currentWalletType = null;
+    await this.updateActor();
+  }
+
   async isAuthenticated(): Promise<boolean> {
-    if (!this.authClient) await this.init();
-    return await this.authClient!.isAuthenticated();
+    if (this.currentWalletType === 'internet-identity') {
+      if (!this.authClient) await this.init();
+      return await this.authClient!.isAuthenticated();
+    } else if (this.currentWalletType === 'identitykit') {
+      return this.identityKitProvider !== null && this.identity !== null;
+    }
+    return false;
+  }
+
+  getWalletType(): WalletType | null {
+    return this.currentWalletType;
   }
 
   async getPrincipal(): Promise<Principal | null> {
@@ -277,26 +281,28 @@ class BitStreamAPI {
   }
 
   private async updateActor() {
-    if (!this.authClient) return;
-
-    if (this.mockMode) {
-      console.log('Mock mode enabled, skipping actor update');
-      return;
-    }
-
     try {
-      // Update identity if authenticated
-      if (await this.authClient.isAuthenticated()) {
-        this.identity = this.authClient.getIdentity();
-        console.log('Updating actor with authenticated identity:', this.identity.getPrincipal().toString());
-      } else {
-        this.identity = null;
+      let currentIdentity = null;
+      
+      if (this.currentWalletType === 'internet-identity' && this.authClient) {
+        if (await this.authClient.isAuthenticated()) {
+          currentIdentity = this.authClient.getIdentity();
+          console.log('Updating actor with Internet Identity:', currentIdentity.getPrincipal().toString());
+        }
+      } else if (this.currentWalletType === 'identitykit' && this.identity) {
+        currentIdentity = this.identity;
+        console.log('Updating actor with IdentityKit identity:', currentIdentity.getPrincipal().toString());
+      }
+      
+      if (!currentIdentity) {
         console.log('Updating actor with anonymous identity');
       }
 
-      this.agent = new HttpAgent({ 
+      this.agent = await HttpAgent.create({
         host: IC_HOST,
-        identity: this.identity || undefined
+        identity: currentIdentity || undefined,
+        retryTimes: 3,
+        verifyQuerySignatures: false // Disable for better compatibility with wallets
       });
 
       // Create actor for IC mainnet
@@ -308,87 +314,42 @@ class BitStreamAPI {
       console.log('Actor updated successfully');
     } catch (error) {
       console.error('Failed to update actor:', error);
-      console.log('Falling back to mock mode');
-      this.mockMode = true;
+      console.log('Actor update failed - API calls will fail gracefully');
     }
   }
 
-  // Mock data for development
-  private getMockStreams(): StreamConfig[] {
-    return [
-      {
-        id: "stream-1",
-        name: "Monthly Rent Payment",
-        description: "Automated rent payment to landlord",
-        category: "Housing",
-        amount: "0.025",
-        currency: "BTC",
-        frequency: "monthly",
-        startDate: "2025-01-01",
-        endDate: "2025-12-31",
-        recipientType: "address",
-        recipientAddress: "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh",
-        recipientEmail: "",
-        conditions: [
-          {
-            id: "cond-1",
-            conditionType: "price",
-            operator: ">=",
-            value: "95000",
-            oracle: "coinbase"
+  // Helper method to execute requests with retry logic and better error handling
+  private async executeWithRetry<T>(operation: () => Promise<T>, operationName: string, maxRetries: number = 3): Promise<T> {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        return await operation();
+      } catch (error: any) {
+        console.error(`${operationName} attempt ${attempt} failed:`, error);
+        
+        // If it's an ingress_expiry error, try to refresh the agent
+        if (error.message?.includes('ingress_expiry') && attempt < maxRetries) {
+          console.log('Attempting to refresh agent due to ingress_expiry error...');
+          try {
+            await this.updateActor();
+          } catch (updateError) {
+            console.warn('Failed to update actor:', updateError);
           }
-        ],
-        maxAmount: "0.1",
-        failureHandling: "pause",
-        notifications: true,
-        creator: Principal.anonymous(),
-        createdAt: BigInt(Date.now() * 1000000),
-        status: "active"
-      },
-      {
-        id: "stream-2", 
-        name: "DCA Investment",
-        description: "Dollar cost averaging into Bitcoin",
-        category: "Investment",
-        amount: "0.01",
-        currency: "BTC",
-        frequency: "weekly",
-        startDate: "2025-01-01",
-        endDate: "",
-        recipientType: "email",
-        recipientAddress: "",
-        recipientEmail: "investment@example.com",
-        conditions: [],
-        maxAmount: "",
-        failureHandling: "retry",
-        notifications: true,
-        creator: Principal.anonymous(),
-        createdAt: BigInt(Date.now() * 1000000),
-        status: "pending"
+        }
+        
+        // If it's the last attempt or a non-retryable error, throw
+        if (attempt === maxRetries || error.message?.includes('not supported by the signer')) {
+          throw error;
+        }
+        
+        // Wait before retrying
+        await new Promise(resolve => setTimeout(resolve, attempt * 1000));
       }
-    ];
-  }
-
-  private getMockBalance(): UserBalance {
-    return {
-      overall: "2.513",
-      available: "18.718", 
-      monthlyProfits: "0.340",
-      monthly: "0.520"
-    };
-  }
-
-  private getMockStats(): StreamStats {
-    return {
-      totalStreams: BigInt(2),
-      activeStreams: BigInt(1),
-      totalVolume: "45.321",
-      categories: [["Housing", BigInt(1)], ["Investment", BigInt(1)]]
-    };
+    }
+    throw new Error(`${operationName} failed after ${maxRetries} attempts`);
   }
 
   // API Methods
-  async createStream(config: Omit<StreamConfig, 'id' | 'creator' | 'createdAt' | 'status'>): Promise<{ ok?: string; err?: string }> {
+  async createStream(config: Omit<StreamConfig, 'id' | 'creator' | 'createdAt' | 'status' | 'lastExecution' | 'nextExecution'>): Promise<{ ok?: string; err?: string }> {
     if (!this.actor) await this.init();
     
     // Convert frontend types to backend types
@@ -397,7 +358,9 @@ class BitStreamAPI {
       id: "", // Will be set by backend
       creator: Principal.anonymous(), // Will be set by backend
       createdAt: BigInt(0), // Will be set by backend
-      status: "pending" // Will be set by backend
+      status: "pending", // Will be set by backend
+      lastExecution: [], // Empty array represents None/null for optional types
+      nextExecution: [] // Empty array represents None/null for optional types
     };
     
     return await this.actor.createStream(backendConfig);
@@ -409,15 +372,19 @@ class BitStreamAPI {
   }
 
   async getUserStreams(): Promise<StreamConfig[]> {
-    if (this.mockMode) {
-      console.log('Using mock streams data');
-      return this.getMockStreams();
+    try {
+      if (!this.actor) await this.init();
+      const principal = await this.getPrincipal();
+      if (!principal) return [];
+      
+      return await this.executeWithRetry(
+        () => this.actor.getUserStreams(principal),
+        'getUserStreams'
+      );
+    } catch (error) {
+      console.error('Failed to fetch user streams:', error);
+      return []; // Return empty array instead of mock data
     }
-    
-    if (!this.actor) await this.init();
-    const principal = await this.getPrincipal();
-    if (!principal) return [];
-    return await this.actor.getUserStreams(principal);
   }
 
   async getAllStreams(): Promise<StreamConfig[]> {
@@ -436,153 +403,108 @@ class BitStreamAPI {
   }
 
   async getUserBalance(): Promise<UserBalance> {
-    if (this.mockMode) {
-      console.log('Using mock balance data');
-      return this.getMockBalance();
-    }
-    
-    if (!this.actor) await this.init();
-    const principal = await this.getPrincipal();
-    if (!principal) {
+    try {
+      if (!this.actor) await this.init();
+      const principal = await this.getPrincipal();
+      if (!principal) {
+        return {
+          overall: "0.00000000",
+          available: "0.00000000",
+          monthlyProfits: "0.00000000",
+          monthly: "0.00000000"
+        };
+      }
+      
+      return await this.executeWithRetry(
+        () => this.actor.getUserBalance(principal),
+        'getUserBalance'
+      );
+    } catch (error) {
+      console.error('Failed to fetch user balance:', error);
       return {
-        overall: "0",
-        available: "0",
-        monthlyProfits: "0",
-        monthly: "0"
+        overall: "0.00000000",
+        available: "0.00000000",
+        monthlyProfits: "0.00000000",
+        monthly: "0.00000000"
       };
     }
-    return await this.actor.getUserBalance(principal);
   }
 
   async getStreamStats(): Promise<StreamStats> {
-    if (this.mockMode) {
-      console.log('Using mock stats data');
-      return this.getMockStats();
-    }
-    
-    if (!this.actor) await this.init();
-    const principal = await this.getPrincipal();
-    if (!principal) {
+    try {
+      if (!this.actor) await this.init();
+      const principal = await this.getPrincipal();
+      if (!principal) {
+        return {
+          totalStreams: BigInt(0),
+          activeStreams: BigInt(0),
+          totalVolume: "0.00000000",
+          categories: []
+        };
+      }
+      
+      return await this.executeWithRetry(
+        () => this.actor.getStreamStats(principal),
+        'getStreamStats'
+      );
+    } catch (error) {
+      console.error('Failed to fetch stream stats:', error);
       return {
         totalStreams: BigInt(0),
         activeStreams: BigInt(0),
-        totalVolume: "0",
+        totalVolume: "0.00000000",
         categories: []
       };
     }
-    return await this.actor.getStreamStats(principal);
   }
 
-  // Oracle API Methods
-  async getOracles(): Promise<Oracle[]> {
-    console.log('getOracles called, mockMode:', this.mockMode)
-    if (this.mockMode) {
-      console.log('Using mock oracles data');
-      return this.getMockOracles();
+  // ckBTC specific methods
+  async getCkBTCInfo(): Promise<{ ok?: { name: string; symbol: string; decimals: number; fee: bigint }; err?: string }> {
+    if (!this.actor) await this.init();
+    return await this.actor.getCkBTCInfo();
+  }
+
+  async executePayment(streamId: string): Promise<{ ok?: string; err?: string }> {
+    if (!this.actor) await this.init();
+    return await this.actor.executePayment(streamId);
+  }
+
+  // Get canister address for deposits
+  async getCanisterAddress(): Promise<string> {
+    if (!this.actor) await this.init();
+    return await this.actor.getCanisterAddress();
+  }
+
+  // Get canister balance
+  async getCanisterBalance(): Promise<number> {
+    try {
+      if (!this.actor) await this.init();
+      const balance = await this.actor.getCanisterBalance();
+      return Number(balance);
+    } catch (error) {
+      console.error('Failed to fetch canister balance:', error);
+      return 0;
     }
-    
-    if (!this.actor) {
-      console.log('No actor found, initializing...')
-      await this.init();
+  }
+
+  // Approve canister to spend ckBTC for automatic payments
+  async approveCanister(amountSatoshis: number): Promise<{ ok?: number; err?: string }> {
+    if (!this.actor) await this.init();
+    return await this.actor.approveCanister(amountSatoshis);
+  }
+
+  // Get current allowance for the canister
+  async getAllowance(): Promise<number> {
+    try {
+      if (!this.actor) await this.init();
+      const allowance = await this.actor.getAllowance();
+      return Number(allowance);
+    } catch (error) {
+      console.error('Failed to fetch allowance:', error);
+      return 0;
     }
-    
-    console.log('Calling actor.getOracles...')
-    const result = await this.actor.getOracles();
-    console.log('Actor getOracles result:', result)
-    return result;
   }
 
-  async getOracle(oracleId: string): Promise<{ ok?: Oracle; err?: string }> {
-    if (!this.actor) await this.init();
-    return await this.actor.getOracle(oracleId);
-  }
-
-  async addOracle(oracle: Oracle): Promise<{ ok?: string; err?: string }> {
-    if (!this.actor) await this.init();
-    return await this.actor.addOracle(oracle);
-  }
-
-  async updateOracleStatus(oracleId: string, status: string): Promise<{ ok?: null; err?: string }> {
-    if (!this.actor) await this.init();
-    return await this.actor.updateOracleStatus(oracleId, status);
-  }
-
-  private getMockOracles(): Oracle[] {
-    return [
-      {
-        id: "oracle-1",
-        name: "CoinGecko",
-        endpoint: "https://api.coingecko.com/api/v3",
-        category: "Market Data",
-        status: "active",
-        uptime: "99.8%",
-        lastUpdate: BigInt(Date.now() * 1000000),
-        feeds: BigInt(8),
-        apiKey: null,
-        isActive: true
-      },
-      {
-        id: "oracle-2", 
-        name: "GitHub API",
-        endpoint: "https://api.github.com",
-        category: "Development",
-        status: "active",
-        uptime: "99.9%",
-        lastUpdate: BigInt(Date.now() * 1000000),
-        feeds: BigInt(5),
-        apiKey: null,
-        isActive: true
-      },
-      {
-        id: "oracle-3",
-        name: "Weather API",
-        endpoint: "https://api.openweathermap.org/data/2.5",
-        category: "Weather", 
-        status: "active",
-        uptime: "99.2%",
-        lastUpdate: BigInt(Date.now() * 1000000),
-        feeds: BigInt(4),
-        apiKey: null,
-        isActive: true
-      },
-      {
-        id: "oracle-4",
-        name: "FlightAware",
-        endpoint: "https://flightxml.flightaware.com",
-        category: "Travel",
-        status: "active",
-        uptime: "98.5%",
-        lastUpdate: BigInt(Date.now() * 1000000),
-        feeds: BigInt(3),
-        apiKey: null,
-        isActive: true
-      },
-      {
-        id: "oracle-5",
-        name: "Sports Data",
-        endpoint: "https://api.sportsdata.io",
-        category: "Sports",
-        status: "maintenance",
-        uptime: "95.1%",
-        lastUpdate: BigInt(Date.now() * 1000000),
-        feeds: BigInt(2),
-        apiKey: null,
-        isActive: false
-      },
-      {
-        id: "oracle-6",
-        name: "News Sentiment",
-        endpoint: "https://newsapi.org",
-        category: "News",
-        status: "active",
-        uptime: "97.8%",
-        lastUpdate: BigInt(Date.now() * 1000000),
-        feeds: BigInt(2),
-        apiKey: null,
-        isActive: true
-      }
-    ];
-  }
 }
 
 // Export singleton instance

@@ -1,10 +1,11 @@
 import type { Metadata } from 'next'
 import './globals.css'
-import { AuthProvider, BitStreamProvider } from '@/contexts/BitStreamContext'
+import { IdentityKitWrapper } from '@/components/IdentityKitWrapper'
+import { BitStreamProvider } from '@/contexts/BitStreamContext'
 
 export const metadata: Metadata = {
   title: 'BitStream - Programmable Bitcoin Payment Streams',
-  description: 'Automated Bitcoin payments with smart conditions and oracle integration',
+  description: 'Simple, automated Bitcoin payment streams powered by Internet Computer',
   generator: 'BitStream',
 }
 
@@ -16,11 +17,11 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <AuthProvider>
+        <IdentityKitWrapper>
           <BitStreamProvider>
             {children}
           </BitStreamProvider>
-        </AuthProvider>
+        </IdentityKitWrapper>
       </body>
     </html>
   )

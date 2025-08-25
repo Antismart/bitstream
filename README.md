@@ -1,37 +1,35 @@
 # BitStream 🔥
 
-> **Programmable Bitcoin Payment Streams with Smart Conditions and Oracle Integration**
+> **Simple, Automated Bitcoin Payment Streams on Internet Computer**
 
-BitStream is a revolutionary decentralized application built on the Internet Computer Protocol (ICP) that enables automated, conditional Bitcoin payments through programmable streams. Create recurring payments, implement complex financial logic, and integrate real-world data through oracles—all secured by the Internet Computer blockchain.
+BitStream is a decentralized application built on the Internet Computer Protocol (ICP) that enables automated Bitcoin payments through programmable streams using ckBTC. Create recurring payments, schedule transfers, and manage your Bitcoin cash flow—all secured by the Internet Computer blockchain and powered by native Bitcoin integration.
 
 ## 🌟 Key Features
+
+### ⚡ **ckBTC Integration**
+- Native Bitcoin integration through Chain-Key Bitcoin (ckBTC)
+- No need for wrapped tokens or bridges
+- Direct Bitcoin transactions on Internet Computer
 
 ### 🚀 **Automated Payment Streams**
 - Create recurring Bitcoin payments (daily, weekly, monthly)
 - Set start/end dates and payment amounts
 - Real-time balance tracking and analytics
 
-### 🧠 **Smart Conditions**
-- Price-based triggers (pay when BTC > $100k)
-- Time-based conditions (pay on specific dates)
-- Oracle data integration (weather, stock prices, APIs)
-- Complex logical operations (AND/OR conditions)
-
-### 🔮 **Oracle Integration**
-- Connect to external APIs and data feeds
-- Price feeds from major exchanges
-- Weather data, stock prices, and custom endpoints
-- Failsafe mechanisms for unreliable data sources
+### ⏰ **Flexible Scheduling**
+- Time-based payment triggers
+- Custom payment frequencies
+- Start and end date management
 
 ### 🔐 **Internet Identity Authentication**
 - Secure, passwordless authentication
 - Privacy-preserving user management
-- Seamless wallet integration
+- Seamless integration with IC ecosystem
 
-### 📊 **Advanced Analytics**
+### 📊 **Payment Analytics**
 - Real-time payment tracking
 - Cash flow projections
-- Performance metrics and insights
+- Stream performance metrics
 - Visual charts and dashboards
 
 ## 🏗️ Architecture
@@ -40,19 +38,18 @@ BitStream is built with a modern, scalable architecture:
 
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   Frontend      │    │    Backend       │    │   External      │
-│   (Next.js)     │◄──►│   (Motoko)       │◄──►│   Oracles       │
+│   Frontend      │    │    Backend       │    │   ckBTC         │
+│   (Next.js)     │◄──►│   (Motoko)       │◄──►│   Integration   │
 │                 │    │                  │    │                 │
-│ • React 19      │    │ • Payment Logic  │    │ • Price Feeds   │
-│ • TypeScript    │    │ • Stream Mgmt    │    │ • Weather APIs  │
-│ • Tailwind CSS  │    │ • User Auth      │    │ • Custom Data   │
+│ • React 19      │    │ • Payment Logic  │    │ • Bitcoin Ledger│
+│ • TypeScript    │    │ • Stream Mgmt    │    │ • ckBTC Minter  │
+│ • Tailwind CSS  │    │ • User Auth      │    │ • Native BTC    │
 │ • shadcn/ui     │    │ • Analytics      │    │                 │
 └─────────────────┘    └──────────────────┘    └─────────────────┘
 ```
 
 ### Backend (Motoko Smart Contracts)
-- **`server/paymentStream.mo`**: Core payment streaming logic with Bitcoin integration
-- **`server/app.mo`**: Main application entry point and routing
+- **`server/paymentStream.mo`**: Core payment streaming logic with ckBTC integration
 
 ### Frontend (Next.js Application)
 - **Modern React 19** with TypeScript for type safety
@@ -132,18 +129,12 @@ BitStream is built with a modern, scalable architecture:
 3. **Configure Your Stream**
    ```javascript
    {
-     name: "Monthly Rent Payment",
+     name: "Monthly Salary Payment",
      amount: "0.025", // BTC
      frequency: "monthly",
      recipient: "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh",
-     conditions: [
-       {
-         type: "price",
-         operator: ">=",
-         value: "95000", // USD
-         oracle: "coinbase"
-       }
-     ]
+     startDate: "2024-01-01",
+     endDate: "2024-12-31"
    }
    ```
 
@@ -152,14 +143,14 @@ BitStream is built with a modern, scalable architecture:
    - View analytics and cash flow
    - Pause/resume streams as needed
 
-### Adding Oracle Conditions
+### ckBTC Integration
 
-BitStream supports various oracle types:
+BitStream leverages Internet Computer's native Bitcoin integration:
 
-- **Price Oracles**: Coinbase, Binance, CoinGecko
-- **Weather Data**: OpenWeatherMap
-- **Custom APIs**: Any REST endpoint
-- **Time-based**: Specific dates and intervals
+- **Chain-Key Bitcoin (ckBTC)**: 1:1 backed Bitcoin tokens on IC
+- **Native Bitcoin Network**: Direct interaction with Bitcoin blockchain
+- **Secure Custody**: Cryptographically secure Bitcoin management
+- **Fast Settlement**: Near-instant transactions with finality
 
 ## 🔧 Development
 
@@ -265,6 +256,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Live Demo**: [bitstream.app](https://bitstream.app) *(coming soon)*
 - **Documentation**: [docs.bitstream.app](https://docs.bitstream.app) *(coming soon)*
 - **Internet Computer**: [internetcomputer.org](https://internetcomputer.org)
+- **ckBTC Documentation**: [internetcomputer.org/docs/build-on-btc](https://internetcomputer.org/docs/build-on-btc)
+- **ckBTC Examples**: [github.com/dfinity/examples/tree/master/motoko/ic-pos](https://github.com/dfinity/examples/tree/master/motoko/ic-pos)
 - **Motoko Language**: [sdk.dfinity.org/docs/language-guide/motoko.html](https://sdk.dfinity.org/docs/language-guide/motoko.html)
 
 ## 🙏 Acknowledgments
